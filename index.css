@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   App shell
+   ------------------------------------------------------------------ */
+:root {
+  /* iOS safe areas (status bar / home indicator). The app reads these as --sat / --sab. */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body {
+  margin: 0;
+  background: #000;
+  /* No pull-to-refresh bounce or grey tap flashes in the installed app */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Content starts below the translucent iOS status bar */
+#root {
+  padding-top: var(--sat);
+}
+
+/* The app has its own large clear button; hide the browser's small one */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+/* ------------------------------------------------------------------
+   High-contrast Daylight mode
+   The app is styled dark by default; the root element gets .speclog-day
+   in daylight mode and these rules re-map the dark utility colours.
+   (Class name kept from the original SpecLog build.)
+   ------------------------------------------------------------------ */
+.speclog-day .bg-black,
+.speclog-day .bg-zinc-950,
+.speclog-day .bg-zinc-900 {
+  background-color: #ffffff;
+}
+
+.speclog-day .bg-zinc-950\/95 {
+  background-color: rgba(255,255,255,.97);
+}
+
+.speclog-day .bg-zinc-800 {
+  background-color: #e4e4e7;
+}
+
+.speclog-day .active\:bg-zinc-700:active,
+.speclog-day .active\:bg-zinc-800:active {
+  background-color: #d4d4d8;
+}
+
+.speclog-day .text-white,
+.speclog-day .active\:text-white:active {
+  color: #000000;
+}
+
+.speclog-day .text-zinc-200,
+.speclog-day .text-zinc-300 {
+  color: #18181b;
+}
+
+.speclog-day .text-zinc-400 {
+  color: #27272a;
+}
+
+.speclog-day .text-zinc-500 {
+  color: #3f3f46;
+}
+
+.speclog-day .text-zinc-600 {
+  color: #52525b;
+}
+
+.speclog-day .border-zinc-600,
+.speclog-day .border-zinc-700 {
+  border-color: #18181b;
+}
+
+.speclog-day .border-zinc-800 {
+  border-color: #71717a;
+}
+
+.speclog-day .ring-zinc-600,
+.speclog-day .ring-zinc-800,
+.speclog-day .ring-zinc-900 {
+  --tw-ring-color: #71717a;
+}
+
+.speclog-day .placeholder-zinc-500::placeholder {
+  color: #52525b;
+}
+
+.speclog-day .text-emerald-300,
+.speclog-day .text-emerald-400,
+.speclog-day .text-emerald-500 {
+  color: #047857;
+}
+
+.speclog-day .text-amber-200,
+.speclog-day .text-amber-300,
+.speclog-day .text-amber-400 {
+  color: #92400e;
+}
+
+.speclog-day .text-red-300,
+.speclog-day .text-red-400,
+.speclog-day .active\:text-red-400:active {
+  color: #b91c1c;
+}
+
+.speclog-day .border-emerald-500,
+.speclog-day .border-emerald-500\/70,
+.speclog-day .focus\:border-emerald-500:focus {
+  border-color: #047857;
+}
+
+.speclog-day .border-amber-400,
+.speclog-day .border-amber-400\/50,
+.speclog-day .border-amber-400\/60,
+.speclog-day .border-amber-400\/70 {
+  border-color: #b45309;
+}
+
+.speclog-day .border-red-500,
+.speclog-day .border-red-500\/50,
+.speclog-day .border-red-500\/60,
+.speclog-day .border-red-500\/70 {
+  border-color: #b91c1c;
+}
+
+.speclog-day .ring-emerald-500,
+.speclog-day .ring-emerald-500\/50,
+.speclog-day .ring-emerald-500\/60 {
+  --tw-ring-color: #047857;
+}
+
+.speclog-day .ring-amber-400\/50,
+.speclog-day .ring-amber-400\/60,
+.speclog-day .ring-amber-500 {
+  --tw-ring-color: #b45309;
+}
+
+.speclog-day .ring-red-500\/50,
+.speclog-day .ring-red-500\/60 {
+  --tw-ring-color: #b91c1c;
+}
+
+.speclog-day .bg-emerald-500\/10,
+.speclog-day .bg-emerald-500\/15 {
+  background-color: rgba(16,185,129,.16);
+}
+
+.speclog-day .bg-amber-400\/5,
+.speclog-day .bg-amber-400\/10,
+.speclog-day .bg-amber-400\/15 {
+  background-color: rgba(245,158,11,.18);
+}
+
+.speclog-day .bg-red-500\/5,
+.speclog-day .bg-red-500\/10,
+.speclog-day .bg-red-500\/15 {
+  background-color: rgba(239,68,68,.14);
+}
+
+.speclog-day .bg-black\/75 {
+  background-color: rgba(0,0,0,.55);
+}
+
+.speclog-day.bg-black {
+  background-color: #ffffff;
+  color: #000000;
+  color-scheme: light;
+}
