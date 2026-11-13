@@ -14,7 +14,7 @@ import {
 import {
   Search, Plus, ChevronLeft, ChevronRight, MapPin, Tag, AlertTriangle,
   CheckCircle2, X, Download, RotateCcw, MessageSquarePlus, Database,
-  Activity, Copy, Gauge, WifiOff, Wifi, Wrench, Trash2, AlertOctagon, SlidersHorizontal, Maximize2, Pencil, Sun, Moon, Undo2, Upload, Home, Archive, ArchiveRestore, ChevronDown,
+  Activity, Copy, Gauge, WifiOff, Wifi, Wrench, Trash2, AlertOctagon, SlidersHorizontal, Maximize2, Pencil, Sun, Moon, Undo2, Upload, Home, Archive, ArchiveRestore, ChevronDown, ListChecks, FolderInput, Check,
 } from 'lucide-react';
 
 /* ============================================================
@@ -126,6 +126,8 @@ const countDecimals = (n) => {
 };
 // Show a reading with at least the parameter's precision, but never hide digits the tech entered (13.12 stays 13.12).
 const fmtV = (v, dp) => fmt(v, Math.max(dp, Math.min(3, countDecimals(v))));
+// Difference from target, shown with the same precision as the reading itself (161.25 → +16.25).
+const dpFor = (v, dp) => Math.max(dp, Math.min(3, countDecimals(v)));
 const decimalsFor = (p) => Math.min(3, Math.max(1, countDecimals(p.targetValue), countDecimals(p.tolerance), hasAlarm(p) ? countDecimals(p.alarmTolerance) : 0));
 const fmt = (n, dp = 1) => (Number.isFinite(Number(n)) ? Number(n).toFixed(dp) : '—');
 const signed = (n, dp = 1) => {
@@ -138,8 +140,9 @@ const parseNum = (s) => {
   if (t === '' || t === '-' || t === '.') return NaN;
   return Number(t);
 };
-const fmtDateTime = (iso) =>
-  new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDay = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const fmtDateTime = (iso) => `${fmtDay(iso)}, ${fmtTime(iso)}`;
 const fmtDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const timeAgo = (iso) => {
   const diff = Date.now() - new Date(iso).getTime();
@@ -476,7 +479,7 @@ function buildCsv(asset, point, readings, assetPath = '') {
     point.label, point.unit, r.value, point.targetValue, point.tolerance, fmt(min, dp), fmt(max, dp),
     hasAlarm(point) ? point.alarmTolerance : '', hasAlarm(point) ? fmt(point.targetValue - point.alarmTolerance, dp) : '',
     hasAlarm(point) ? fmt(point.targetValue + point.alarmTolerance, dp) : '',
-    (r.value - point.targetValue).toFixed(dp), SEV[r.sev || severityOf(point, r)].label, r.notes || '',
+    (r.value - point.targetValue).toFixed(dpFor(r.value, dp)), SEV[r.sev || severityOf(point, r)].label, r.notes || '',
   ]);
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }
@@ -713,7 +716,7 @@ function useOnline() {
    Modals: new asset, new parameter, reset, CSV fallback
    ============================================================ */
 
-function AddParameterModal({ onClose, onCreate, initial, readings = [] }) {
+function AddParameterModal({ onClose, onCreate, initial, readings = [], bulkCount = 0 }) {
   const editing = Boolean(initial);
   const [form, setForm] = useState(() => ({
     label: initial ? initial.label : '',
@@ -766,7 +769,12 @@ function AddParameterModal({ onClose, onCreate, initial, readings = [] }) {
   };
 
   return (
-    <Modal title={editing ? 'Edit Parameter' : 'Add Parameter'} onClose={onClose}>
+    <Modal title={editing ? 'Edit Parameter' : bulkCount ? `Add to ${plural(bulkCount, 'Asset')}` : 'Add Parameter'} onClose={onClose}>
+      {bulkCount > 0 && (
+        <p className="mb-4 rounded-xl bg-zinc-800 px-4 py-3 text-sm text-zinc-300">
+          This parameter is added to all <span className="font-bold text-white">{plural(bulkCount, 'selected asset')}</span>. Any that already have one with the same name and unit are skipped.
+        </p>
+      )}
       <form onSubmit={submit} noValidate>
         <Field label="Parameter Label" error={errors.label}>
           <input className={inputCls} value={form.label} onChange={set('label')} placeholder="e.g. Vibration (DE Horizontal)" autoFocus />
@@ -810,7 +818,7 @@ function AddParameterModal({ onClose, onCreate, initial, readings = [] }) {
         {errors.form && <p className="mb-3 text-sm font-semibold text-red-400">{errors.form}</p>}
         <PrimaryButton type="submit" disabled={saving}>
           {editing ? <Pencil size={20} strokeWidth={2.5} /> : <Plus size={22} strokeWidth={3} />}{' '}
-          {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Parameter'}
+          {saving ? 'Saving…' : editing ? 'Save Changes' : bulkCount ? `Add to ${plural(bulkCount, 'asset')}` : 'Add Parameter'}
         </PrimaryButton>
       </form>
     </Modal>
@@ -1728,7 +1736,7 @@ function useLongPress(onLongPress, targetRef, ms = 500) {
   return { handlers, consumeClick };
 }
 
-function AssetMenu({ asset, path, archived, onClose, onOpen, onEdit, onArchive, onUnarchive, onDelete }) {
+function AssetMenu({ asset, path, archived, onClose, onOpen, onEdit, onArchive, onUnarchive, onDelete, onSelectMany }) {
   const item = 'flex h-14 w-full items-center gap-3 rounded-xl px-4 text-left text-base font-bold active:bg-zinc-800';
   return (
     <Modal title="Asset" onClose={onClose}>
@@ -1740,6 +1748,9 @@ function AssetMenu({ asset, path, archived, onClose, onOpen, onEdit, onArchive, 
       <div className="space-y-1">
         <button type="button" onClick={onOpen} className={cx(item, 'text-white')}><ChevronRight size={22} /> Open</button>
         <button type="button" onClick={onEdit} className={cx(item, 'text-white')}><Pencil size={20} /> Edit or move</button>
+        {!archived && onSelectMany && (
+          <button type="button" onClick={onSelectMany} className={cx(item, 'text-white')}><ListChecks size={20} /> Select multiple…</button>
+        )}
         {archived ? (
           <button type="button" onClick={onUnarchive} className={cx(item, 'text-emerald-400')}><ArchiveRestore size={21} /> Restore from archive</button>
         ) : (
@@ -1759,9 +1770,9 @@ function AssetMenu({ asset, path, archived, onClose, onOpen, onEdit, onArchive, 
 
 const MAX_ISSUE_LINES = 4;
 
-function AssetCard({ asset, status, path, tree, onOpen, onOpenAsset, onLongPress, archived }) {
+function AssetCard({ asset, status, path, tree, onOpen, onOpenAsset, onLongPress, archived, selectMode, selected, onToggleSelect }) {
   const cardRef = useRef(null);
-  const { handlers, consumeClick } = useLongPress(onLongPress, cardRef);
+  const { handlers, consumeClick } = useLongPress(selectMode ? null : onLongPress, cardRef);
   const parts = [];
   if (status.childCount) parts.push(plural(status.childCount, 'sub-asset'));
   parts.push(`${status.pointCount} param${status.pointCount === 1 ? '' : 's'}`);
@@ -1781,12 +1792,16 @@ function AssetCard({ asset, status, path, tree, onOpen, onOpenAsset, onLongPress
       ref={cardRef}
       className={cx(
         'w-full overflow-hidden rounded-2xl border-2 bg-zinc-900',
-        archived ? 'border-zinc-800' : status.kind === 'alarm' ? 'border-red-500/60' : status.kind === 'warn' ? 'border-amber-400/60' : status.kind === 'ok' ? 'border-zinc-700' : 'border-zinc-800',
+        selectMode && selected ? 'border-emerald-500 ring-2 ring-emerald-500/40' : archived ? 'border-zinc-800' : status.kind === 'alarm' ? 'border-red-500/60' : status.kind === 'warn' ? 'border-amber-400/60' : status.kind === 'ok' ? 'border-zinc-700' : 'border-zinc-800',
       )}
     >
       <button
         type="button"
-        onClick={() => { if (!consumeClick()) onOpen(); }}
+        onClick={() => {
+          if (selectMode) onToggleSelect();
+          else if (!consumeClick()) onOpen();
+        }}
+        aria-pressed={selectMode ? Boolean(selected) : undefined}
         {...handlers}
         style={{ WebkitTouchCallout: 'none' }}
         className={cx('block w-full select-none p-4 text-left transition-transform active:scale-[0.99] active:bg-zinc-800', archived && 'opacity-60')}
@@ -1801,7 +1816,19 @@ function AssetCard({ asset, status, path, tree, onOpen, onOpenAsset, onLongPress
             <p className="mt-1.5 flex items-center gap-1.5 text-sm text-zinc-400"><MapPin size={15} className="shrink-0" /> {asset.location}</p>
             <p className="mt-1 flex items-center gap-1.5 font-mono text-sm text-zinc-400"><Tag size={15} className="shrink-0" /> {asset.identifier}</p>
           </div>
-          <ChevronRight className="mt-1 shrink-0 text-zinc-500" size={26} />
+          {selectMode ? (
+            <span
+              aria-hidden="true"
+              className={cx(
+                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2',
+                selected ? 'border-emerald-500 bg-emerald-500 text-zinc-950' : 'border-zinc-500',
+              )}
+            >
+              {selected && <Check size={20} strokeWidth={3.5} />}
+            </span>
+          ) : (
+            <ChevronRight className="mt-1 shrink-0 text-zinc-500" size={26} />
+          )}
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           {archived ? (
@@ -1825,7 +1852,7 @@ function AssetCard({ asset, status, path, tree, onOpen, onOpenAsset, onLongPress
               <button
                 key={it.point.id}
                 type="button"
-                onClick={() => onOpenAsset(it.assetId)}
+                onClick={() => (selectMode ? onToggleSelect() : onOpenAsset(it.assetId))}
                 aria-label={`Open ${rel.length ? rel[rel.length - 1].name : asset.name}: ${it.point.label} ${SEV[it.sev].label}`}
                 className={cx(
                   'flex min-h-[48px] w-full items-center gap-2.5 rounded-xl px-3 py-1.5 text-left ring-1',
@@ -2025,6 +2052,190 @@ function AssetModal({ initial, parent, assets, tree, pointsByEquipment, onClose,
   );
 }
 
+/* ---------- Multi-select: bulk actions on several sibling assets at once ---------- */
+
+const sameParam = (a, b) =>
+  String(a.label).trim().toLowerCase() === String(b.label).trim().toLowerCase() &&
+  String(a.unit).trim().toLowerCase() === String(b.unit).trim().toLowerCase();
+
+function SelectButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-11 items-center gap-1.5 rounded-xl px-3 text-xs font-black uppercase tracking-wider text-emerald-400 active:bg-zinc-800"
+    >
+      <ListChecks size={18} /> Select
+    </button>
+  );
+}
+
+function SelectionBar({ count, total, onSelectAll, onClear, onDone, actions }) {
+  const barRef = useRef(null);
+  useEffect(() => {
+    animateEl(barRef.current, [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: 300, easing: SPRING });
+  }, []);
+  const all = count === total && total > 0;
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center">
+      <div
+        ref={barRef}
+        role="toolbar"
+        aria-label="Bulk actions"
+        className="pointer-events-auto w-full max-w-md rounded-t-2xl border-2 border-b-0 border-emerald-500/60 bg-zinc-900 px-3 pb-[calc(0.75rem+var(--sab,0px))] pt-2 shadow-2xl"
+      >
+        <div className="flex items-center gap-2">
+          <p className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-white">
+            {count} selected
+          </p>
+          <button
+            type="button"
+            onClick={all ? onClear : onSelectAll}
+            className="h-11 rounded-xl px-3 text-xs font-black uppercase tracking-wider text-emerald-400 active:bg-zinc-800"
+          >
+            {all ? 'Clear' : 'Select all'}
+          </button>
+          <button
+            type="button"
+            onClick={onDone}
+            className="h-11 rounded-xl bg-zinc-800 px-4 text-xs font-black uppercase tracking-wider text-white active:bg-zinc-700"
+          >
+            Done
+          </button>
+        </div>
+        <div className="mt-2 grid grid-cols-5 gap-1.5">
+          {actions.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              onClick={a.onClick}
+              disabled={count === 0}
+              className={cx(
+                'flex h-[60px] flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-black uppercase leading-tight tracking-wide active:bg-zinc-800 disabled:opacity-35',
+                a.danger ? 'text-red-400' : 'text-zinc-200',
+              )}
+            >
+              {a.icon}
+              <span className="text-center">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkCopyParamsModal({ assets, tree, pointsByEquipment, selectedIds, onClose, onCopy }) {
+  const sources = useMemo(
+    () => assets
+      .filter((a) => !tree.isArchived(a) && (pointsByEquipment.get(a.id) || []).length > 0)
+      .map((a) => ({ id: a.id, label: pathLabel([...tree.pathOf(a), a]), n: pointsByEquipment.get(a.id).length }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true })),
+    [assets, tree, pointsByEquipment],
+  );
+  const [from, setFrom] = useState(() => {
+    const inSel = sources.find((s) => selectedIds.includes(s.id));
+    return String((inSel || sources[0] || {}).id ?? '');
+  });
+  const [busy, setBusy] = useState(false);
+  const params = from ? pointsByEquipment.get(Number(from)) || [] : [];
+  const targets = selectedIds.filter((id) => String(id) !== from);
+  return (
+    <Modal title="Copy Parameters" onClose={onClose}>
+      {sources.length === 0 ? (
+        <p className="text-base text-zinc-300">No asset has parameters yet. Add a parameter to one asset first, or use <span className="font-bold text-white">Add parameter</span> to add one to all selected assets.</p>
+      ) : (
+        <>
+          <Field label="Copy from" hint="Labels, units, targets, tolerances and alarm zones are copied. Readings are not.">
+            <select className={selectCls} value={from} onChange={(e) => setFrom(e.target.value)}>
+              {sources.map((s) => <option key={s.id} value={s.id}>{s.label} ({s.n} param{s.n === 1 ? '' : 's'})</option>)}
+            </select>
+          </Field>
+          <div className="mb-4 rounded-xl border border-dashed border-zinc-700 px-4 py-3">
+            {params.map((p) => <RangeInfo key={p.id} point={p} className="mb-1.5 last:mb-0" />)}
+          </div>
+          <p className="mb-4 text-sm text-zinc-400">Assets that already have a parameter with the same name and unit keep theirs.</p>
+          <PrimaryButton
+            type="button"
+            disabled={busy || targets.length === 0}
+            onClick={async () => { setBusy(true); const ok = await onCopy(Number(from), targets); if (!ok) setBusy(false); }}
+          >
+            <Copy size={20} /> {busy ? 'Copying…' : `Copy to ${plural(targets.length, 'asset')}`}
+          </PrimaryButton>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function BulkMoveModal({ assets, tree, selectedIds, onClose, onMove }) {
+  const blocked = useMemo(() => {
+    const s = new Set(selectedIds);
+    for (const id of selectedIds) for (const d of tree.descendants(id)) s.add(d.id);
+    return s;
+  }, [selectedIds, tree]);
+  const options = useMemo(
+    () => assets
+      .filter((a) => !blocked.has(a.id) && !tree.isArchived(a))
+      .map((a) => ({ id: a.id, label: pathLabel([...tree.pathOf(a), a]) }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true })),
+    [assets, blocked, tree],
+  );
+  const [dest, setDest] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title={`Move ${plural(selectedIds.length, 'Asset')}`} onClose={onClose}>
+      <Field label="Move inside" hint="Everything inside each asset moves with it.">
+        <select className={selectCls} value={dest} onChange={(e) => setDest(e.target.value)}>
+          <option value="">— Top level (no parent) —</option>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
+      </Field>
+      <PrimaryButton
+        type="button"
+        disabled={busy}
+        onClick={async () => { setBusy(true); const ok = await onMove(dest === '' ? null : Number(dest)); if (!ok) setBusy(false); }}
+      >
+        {busy ? 'Moving…' : 'Move'}
+      </PrimaryButton>
+    </Modal>
+  );
+}
+
+function BulkDeleteModal({ names, counts, onClose, onConfirm }) {
+  const [busy, setBusy] = useState(false);
+  const shown = names.slice(0, 4).join(', ') + (names.length > 4 ? ` and ${names.length - 4} more` : '');
+  return (
+    <Modal title={`Delete ${plural(names.length, 'Asset')}`} onClose={onClose}>
+      <p className="mb-2 text-base leading-relaxed text-zinc-300">
+        Delete <span className="font-bold text-white">{shown}</span>?
+      </p>
+      <p className="mb-5 text-base leading-relaxed text-zinc-300">
+        This permanently erases{' '}
+        <span className="font-bold text-red-400">
+          {[plural(names.length, 'asset'), counts.subs ? plural(counts.subs, 'sub-asset') : null, plural(counts.points, 'parameter'), plural(counts.readings, 'reading')]
+            .filter(Boolean)
+            .join(', ')}
+        </span>
+        . Archive instead if you might need them later. This cannot be undone.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" onClick={onClose} className="h-14 rounded-xl border-2 border-zinc-700 text-lg font-bold uppercase text-zinc-200 active:bg-zinc-800">
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => { setBusy(true); const ok = await onConfirm(); if (!ok) setBusy(false); }}
+          className="flex h-14 items-center justify-center gap-2 rounded-xl bg-red-600 text-lg font-black uppercase text-white active:bg-red-500 disabled:opacity-50"
+        >
+          <Trash2 size={20} /> {busy ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function DeleteAssetModal({ asset, counts, onClose, onConfirm }) {
   const [busy, setBusy] = useState(false);
   return (
@@ -2104,7 +2315,7 @@ function searchAssets(equipment, tree, query) {
     b.score - a.score || a.depth - b.depth || a.asset.name.localeCompare(b.asset.name, undefined, { numeric: true }));
 }
 
-function HomeScreen({ data, tree, statusById, onOpenAsset, onNewAsset, onReset, onBackup, onAssetMenu, storageKind }) {
+function HomeScreen({ data, tree, statusById, onOpenAsset, onNewAsset, onReset, onBackup, onAssetMenu, storageKind, selection, onStartSelect, onToggleSelect }) {
   const [q, setQ] = useState('');
   const needle = q.trim().toLowerCase();
   const rank = (a, b) =>
@@ -2193,12 +2404,33 @@ function HomeScreen({ data, tree, statusById, onOpenAsset, onNewAsset, onReset, 
             {q ? <>No assets match “{q}”.</> : <>No assets yet. Tap <span className="font-bold text-white">New Asset</span> to add one.</>}
           </div>
         )}
-        {list.map((e) => (
-          <AssetCard key={e.id} asset={e} status={statusById.get(e.id)} path={results ? tree.pathOf(e) : null} tree={tree} onOpen={() => onOpenAsset(e.id)} onOpenAsset={onOpenAsset} onLongPress={() => onAssetMenu(e.id)} />
-        ))}
-        {!results && topLevel.length > 0 && (
-          <p className="pt-1 text-center text-xs text-zinc-600">Press and hold an asset for archive, edit and delete</p>
+        {!results && topLevel.length > 1 && !selection && (
+          <div className="-mb-1 -mt-1 flex justify-end">
+            <SelectButton onClick={() => onStartSelect(null)} />
+          </div>
         )}
+        {list.map((e) => {
+          const selectable = Boolean(selection) && !results;
+          return (
+            <AssetCard
+              key={e.id}
+              asset={e}
+              status={statusById.get(e.id)}
+              path={results ? tree.pathOf(e) : null}
+              tree={tree}
+              onOpen={() => onOpenAsset(e.id)}
+              onOpenAsset={onOpenAsset}
+              onLongPress={() => onAssetMenu(e.id)}
+              selectMode={selectable}
+              selected={selectable && selection.ids.includes(e.id)}
+              onToggleSelect={() => onToggleSelect(e.id)}
+            />
+          );
+        })}
+        {!results && topLevel.length > 0 && !selection && (
+          <p className="pt-1 text-center text-xs text-zinc-600">Press and hold an asset for more options · tap Select to change several at once</p>
+        )}
+        {selection && <div className="h-36" aria-hidden="true" />}
         {!results && archivedList.length > 0 && (
           <section className="pt-3">
             <button
@@ -2301,7 +2533,7 @@ function ResultBanner({ point, reading, onDismiss }) {
           <CheckCircle2 size={22} strokeWidth={2.5} /> In spec — saved
         </p>
         <p className="mt-1 font-mono text-sm">
-          {fmtV(v, dp)} {point.unit} · Δ {signed(dTarget, dp)} from target
+          {fmtV(v, dp)} {point.unit} · Δ {signed(dTarget, dpFor(v, dp))} from target
         </p>
       </>
     );
@@ -2329,7 +2561,7 @@ function ResultBanner({ point, reading, onDismiss }) {
           </p>
         )}
         <p className="mt-0.5 text-sm opacity-80">
-          Δ {signed(dTarget, dp)} {point.unit} from target · {sev === 'warn' ? 'monitor closely' : 'take action / escalate'}
+          Δ {signed(dTarget, dpFor(v, dp))} {point.unit} from target · {sev === 'warn' ? 'monitor closely' : 'take action / escalate'}
         </p>
       </>
     );
@@ -2500,7 +2732,8 @@ function PointCard({ point, readings, onLog, onOpen, onDelete, onEditZones, onEd
 }
 
 function AssetScreen({
-  asset, path, subAssets, statusById, tree, points, readingsByPoint, onBack, onHome, onOpenAsset, archived, archivedSelf, onUnarchive, onAssetMenu, onAddSubAsset, onAddPoint, onLog,
+  asset, path, subAssets, statusById, tree, points, readingsByPoint, onBack, onHome, onOpenAsset, archived, archivedSelf, onUnarchive, onAssetMenu,
+  selection, onStartSelect, onToggleSelect, onAddSubAsset, onAddPoint, onLog,
   onOpenPoint, onDeletePoint, onEditZones, onEditAsset, onEditPoint,
 }) {
   const latestSev = points.map((p) => {
@@ -2591,10 +2824,25 @@ function AssetScreen({
 
         {subAssets.length > 0 && (
           <section className="space-y-3">
-            <h2 className={sectionCls}>Sub-assets · {subAssets.length}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className={sectionCls}>Sub-assets · {subAssets.length}</h2>
+              {subAssets.length > 1 && !selection && <SelectButton onClick={() => onStartSelect(asset.id)} />}
+            </div>
             {subAssets.map((e) => (
-              <AssetCard key={e.id} asset={e} status={statusById.get(e.id)} tree={tree} onOpen={() => onOpenAsset(e.id)} onOpenAsset={onOpenAsset} onLongPress={() => onAssetMenu(e.id)} />
+              <AssetCard
+                key={e.id}
+                asset={e}
+                status={statusById.get(e.id)}
+                tree={tree}
+                onOpen={() => onOpenAsset(e.id)}
+                onOpenAsset={onOpenAsset}
+                onLongPress={() => onAssetMenu(e.id)}
+                selectMode={Boolean(selection)}
+                selected={Boolean(selection) && selection.ids.includes(e.id)}
+                onToggleSelect={() => onToggleSelect(e.id)}
+              />
             ))}
+            {selection && <div className="h-36" aria-hidden="true" />}
           </section>
         )}
 
@@ -2617,17 +2865,22 @@ function AssetScreen({
    Screen 3: Point trend & audit log
    ============================================================ */
 
-function TrendTooltip({ active, payload, point }) {
+const EXPANDED_TIP_W = 210; // fixed tooltip width in the full-screen chart, so it can be placed inside the visible area
+
+function TrendTooltip({ active, payload, point, fixedWidth }) {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0].payload;
   const dp = decimalsFor(point);
   return (
-    <div className={cx('max-w-[220px] rounded-xl border-2 bg-zinc-950 p-3 shadow-xl', d.sev === 'alarm' ? 'border-red-500' : d.sev === 'warn' ? 'border-amber-400' : 'border-emerald-500')}>
+    <div
+      style={fixedWidth ? { width: fixedWidth } : undefined}
+      className={cx('rounded-xl border-2 bg-zinc-950 p-3 shadow-xl', !fixedWidth && 'max-w-[220px]', d.sev === 'alarm' ? 'border-red-500' : d.sev === 'warn' ? 'border-amber-400' : 'border-emerald-500')}
+    >
       <p className="text-xs font-semibold text-zinc-400">{fmtDateTime(d.recordedAt)}</p>
       <p className={cx('font-mono text-xl font-black', SEV[d.sev].text)}>
         {fmtV(d.value, dp)} <span className="text-sm text-zinc-400">{point.unit}</span>
       </p>
-      <p className="font-mono text-xs text-zinc-300">Δ {signed(d.value - point.targetValue, dp)} from target</p>
+      <p className="font-mono text-xs text-zinc-300">Δ {signed(d.value - point.targetValue, dpFor(d.value, dp))} from target</p>
       <div className="mt-1.5"><StatusPill sev={d.sev} small /></div>
       {d.notes && <p className="mt-1.5 text-xs italic text-zinc-400">“{d.notes}”</p>}
     </div>
@@ -2655,6 +2908,8 @@ function ExpandedChart({ point, readings, onClose }) {
     h: typeof window !== 'undefined' ? window.innerHeight : 700,
   }));
   const scrollRef = useRef(null);
+  const [active, setActive] = useState(null); // { x, y } of the tapped point, in chart coordinates
+  const [view, setView] = useState({ left: 0, width: 0 }); // the part of the wide chart currently on screen
   const dp = decimalsFor(point);
   const { min, max } = limits(point);
   const alarmOn = hasAlarm(point);
@@ -2678,7 +2933,19 @@ function ExpandedChart({ point, readings, onClose }) {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollLeft = el.scrollWidth;
-  }, [readings.length, size.w]);
+    measureView();
+  }, [readings.length, size.w]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const CHART_INSET = 8; // the scroll area's left padding (px-2) before the chart starts
+  const measureView = () => {
+    const el = scrollRef.current;
+    if (el) setView({ left: el.scrollLeft - CHART_INSET, width: el.clientWidth });
+  };
+  const trackActive = (state) => {
+    if (state && state.isTooltipActive && state.activeCoordinate) {
+      setActive({ x: state.activeCoordinate.x, y: state.activeCoordinate.y });
+    }
+  };
 
   const data = readings.map((r, i) => ({ i, value: r.value, sev: r.sev, notes: r.notes, recordedAt: r.recordedAt }));
   const values = readings.map((r) => r.value);
@@ -2695,6 +2962,20 @@ function ExpandedChart({ point, readings, onClose }) {
   const chartW = Math.max(size.w - 16, data.length * SPACING + 90);
   const chartH = Math.max(260, size.h - 190);
   const scrolls = chartW > size.w - 16;
+  // Keep the tooltip fully inside the visible part of the chart: to the right of the point when it fits,
+  // otherwise flipped to the left; never past either screen edge, whatever the scroll position.
+  const tipPosition = (() => {
+    if (!active || !view.width) return undefined;
+    const gap = 14;
+    const edge = 8;
+    const visLeft = view.left + edge;
+    const visRight = view.left + view.width - edge;
+    let x = active.x + gap;
+    if (x + EXPANDED_TIP_W > visRight) x = active.x - gap - EXPANDED_TIP_W;
+    x = Math.max(visLeft, Math.min(x, visRight - EXPANDED_TIP_W));
+    const y = Math.max(8, Math.min(active.y - 70, chartH - 150));
+    return { x, y };
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950 pb-[var(--sab,0px)] pt-[var(--sat,0px)]" role="dialog" aria-modal="true" aria-label={`${point.label} full history`}>
@@ -2736,8 +3017,15 @@ function ExpandedChart({ point, readings, onClose }) {
         <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">‹ Swipe sideways for older readings · tap a point for details</p>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-hidden px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-        <LineChart width={chartW} height={chartH} data={data} margin={{ top: 28, right: 8, bottom: 22, left: 8 }}>
+      <div ref={scrollRef} onScroll={measureView} className="flex-1 overflow-x-auto overflow-y-hidden px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <LineChart
+          width={chartW}
+          height={chartH}
+          data={data}
+          margin={{ top: 28, right: 8, bottom: 22, left: 8 }}
+          onMouseMove={trackActive}
+          onClick={trackActive}
+        >
           <CartesianGrid stroke={C.grid} strokeDasharray="3 3" />
           <XAxis dataKey="i" type="category" interval={0} tick={<ExpandedTick data={data} />} stroke={C.axis} padding={{ left: 24, right: 24 }} height={36} />
           <YAxis orientation="right" domain={domain} tickFormatter={(v) => fmt(v, dp)} tick={{ fill: C.tick, fontSize: 11 }} stroke={C.axis} width={54} allowDataOverflow />
@@ -2749,7 +3037,12 @@ function ExpandedChart({ point, readings, onClose }) {
           {alarmOn && <ReferenceLine y={amax} stroke={C.alarm} strokeDasharray="4 4" strokeOpacity={0.8} ifOverflow={zoom ? 'discard' : 'extendDomain'} />}
           {alarmOn && <ReferenceLine y={amin} stroke={C.alarm} strokeDasharray="4 4" strokeOpacity={0.8} ifOverflow={zoom ? 'discard' : 'extendDomain'} />}
           <ReferenceLine y={point.targetValue} stroke={C.ok} strokeDasharray="2 4" ifOverflow={zoom ? 'discard' : 'extendDomain'} />
-          <Tooltip content={<TrendTooltip point={point} />} cursor={{ stroke: C.cursor, strokeWidth: 1 }} />
+          <Tooltip
+            content={<TrendTooltip point={point} fixedWidth={EXPANDED_TIP_W} />}
+            cursor={{ stroke: C.cursor, strokeWidth: 1 }}
+            position={tipPosition}
+            isAnimationActive={false}
+          />
           <Line
             type="linear"
             dataKey="value"
@@ -2940,35 +3233,49 @@ function PointScreen({ asset, assetPath, point, readings, onBack, onHome, notify
 
         <div className="overflow-hidden rounded-2xl border-2 border-zinc-800 bg-zinc-900">
           <h2 className="border-b border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-widest text-zinc-400">Audit log · newest first</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left text-sm">
-              <thead className="bg-zinc-950 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                <tr>
-                  <th className="px-3 py-2.5">Date / Time</th>
-                  <th className="px-3 py-2.5 text-right">Value</th>
-                  <th className="px-3 py-2.5 text-right">Δ Target</th>
-                  <th className="px-3 py-2.5">Status</th>
-                  <th className="px-3 py-2.5">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {audit.map((r) => (
-                  <tr key={r.id} className={cx('border-t border-zinc-800', r.sev === 'alarm' && 'bg-red-500/5', r.sev === 'warn' && 'bg-amber-400/5')}>
-                    <td className="whitespace-nowrap px-3 py-3 text-zinc-300">{fmtDateTime(r.recordedAt)}</td>
-                    <td className={cx('whitespace-nowrap px-3 py-3 text-right font-mono font-bold', r.sev === 'ok' ? 'text-white' : SEV[r.sev].text)}>
+          {/* Fits a phone screen with no sideways scrolling: time stacked under the date, notes on their own line. */}
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-950 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <tr>
+                <th className="py-2.5 pl-3 pr-1.5">When</th>
+                <th className="px-1.5 py-2.5 text-right">Value</th>
+                <th className="px-1.5 py-2.5 text-right">Δ</th>
+                <th className="py-2.5 pl-1.5 pr-3 text-right">Status</th>
+              </tr>
+            </thead>
+            {audit.map((r) => {
+              const tint = cx(r.sev === 'alarm' && 'bg-red-500/5', r.sev === 'warn' && 'bg-amber-400/5');
+              return (
+                <tbody key={r.id} className={cx('border-t border-zinc-800', tint)}>
+                  <tr>
+                    <td className={cx('whitespace-nowrap pl-3 pr-1.5 text-zinc-300', r.notes ? 'pt-3' : 'py-3')}>
+                      <span className="block text-sm">{fmtDay(r.recordedAt)}</span>
+                      <span className="block text-xs text-zinc-500">{fmtTime(r.recordedAt)}</span>
+                    </td>
+                    <td className={cx('whitespace-nowrap px-1.5 text-right font-mono font-bold', r.notes ? 'pt-3' : 'py-3', r.sev === 'ok' ? 'text-white' : SEV[r.sev].text)}>
                       {fmtV(r.value, dp)} <span className="text-xs text-zinc-500">{point.unit}</span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-zinc-300">{signed(r.value - point.targetValue, dp)}</td>
-                    <td className="px-3 py-3"><StatusPill sev={r.sev} small /></td>
-                    <td className="px-3 py-3 text-zinc-400">{r.notes || <span className="text-zinc-600">—</span>}</td>
+                    <td className={cx('whitespace-nowrap px-1.5 text-right font-mono text-zinc-300', r.notes ? 'pt-3' : 'py-3')}>
+                      {signed(r.value - point.targetValue, dpFor(r.value, dp))}
+                    </td>
+                    <td className={cx('whitespace-nowrap pl-1.5 pr-3 text-right', r.notes ? 'pt-3' : 'py-3')}>
+                      <StatusPill sev={r.sev} small />
+                    </td>
                   </tr>
-                ))}
-                {!audit.length && (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-zinc-500">No readings yet.</td></tr>
-                )}
+                  {r.notes && (
+                    <tr>
+                      <td colSpan={4} className="break-words px-3 pb-3 pt-1.5 text-xs italic text-zinc-400">“{r.notes}”</td>
+                    </tr>
+                  )}
+                </tbody>
+              );
+            })}
+            {!audit.length && (
+              <tbody>
+                <tr><td colSpan={4} className="px-3 py-6 text-center text-zinc-500">No readings yet.</td></tr>
               </tbody>
-            </table>
-          </div>
+            )}
+          </table>
         </div>
         <button
           type="button"
@@ -3009,6 +3316,7 @@ export default function InSpecApp() {
   const [toast, setToast] = useState(null);
   const online = useOnline();
   const [backupPrompt, setBackupPrompt] = useState(null);
+  const [selection, setSelection] = useState(null); // { scope: parentId | null, ids: number[] } while selecting siblings
   const dataRef = useRef(null);
   const offlineSince = useRef(typeof navigator !== 'undefined' && navigator.onLine === false ? Date.now() : null);
   const lastPromptAt = useRef(0);
@@ -3266,6 +3574,112 @@ export default function InSpecApp() {
     notify('Asset updated');
   };
 
+  // ---- Multi-select (siblings: top-level assets, or the sub-assets of one asset)
+  const selectionMatchesView = (sel) =>
+    sel && ((sel.scope === null && view.name === 'home') || (view.name === 'asset' && view.id === sel.scope));
+  useEffect(() => {
+    if (selection && !selectionMatchesView(selection)) setSelection(null);
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectable = selection ? (tree.live.get(selection.scope) || []) : [];
+  const startSelect = (scope, firstId = null) => setSelection({ scope, ids: firstId != null ? [firstId] : [] });
+  const toggleSelect = (id) =>
+    setSelection((sel) => (sel ? { ...sel, ids: sel.ids.includes(id) ? sel.ids.filter((x) => x !== id) : [...sel.ids, id] } : sel));
+  const finishBulk = async (message, action) => {
+    await refresh();
+    setModal(null);
+    setSelection(null);
+    notify(message, 'ok', action || null);
+    return true;
+  };
+
+  const bulkAddParameter = async (fields) => {
+    const ids = selection ? selection.ids : [];
+    let added = 0;
+    let skipped = 0;
+    for (const id of ids) {
+      if ((pointsByEquipment.get(id) || []).some((p) => sameParam(p, fields))) { skipped++; continue; }
+      await store.add('inspectionPoints', { equipmentId: id, ...fields });
+      added++;
+    }
+    return finishBulk(`${fields.label} added to ${plural(added, 'asset')}${skipped ? ` · ${skipped} already had it` : ''}`);
+  };
+
+  const bulkCopyParameters = async (fromId, targetIds) => {
+    try {
+      const template = pointsByEquipment.get(fromId) || [];
+      let added = 0;
+      for (const id of targetIds) {
+        const existing = pointsByEquipment.get(id) || [];
+        for (const p of template) {
+          if (existing.some((e) => sameParam(e, p))) continue;
+          await store.add('inspectionPoints', {
+            equipmentId: id, label: p.label, unit: p.unit, targetValue: p.targetValue, tolerance: p.tolerance, alarmTolerance: p.alarmTolerance ?? null,
+          });
+          added++;
+        }
+      }
+      return finishBulk(`Copied ${plural(added, 'parameter')} to ${plural(targetIds.length, 'asset')}`);
+    } catch {
+      notify('Copy failed — try again', 'warn');
+      return false;
+    }
+  };
+
+  const bulkMove = async (parentId) => {
+    const ids = selection ? selection.ids : [];
+    try {
+      for (const id of ids) {
+        if (parentId != null && (parentId === id || tree.descendants(id).some((d) => d.id === parentId))) continue; // never create a loop
+        await store.update('equipment', id, { parentId });
+      }
+      const dest = parentId == null ? 'the top level' : tree.byId.get(parentId)?.name || 'the new parent';
+      return finishBulk(`Moved ${plural(ids.length, 'asset')} to ${dest}`);
+    } catch {
+      notify('Move failed — try again', 'warn');
+      return false;
+    }
+  };
+
+  const bulkArchive = async () => {
+    const ids = selection ? selection.ids : [];
+    try {
+      const at = new Date().toISOString();
+      for (const id of ids) await store.update('equipment', id, { archivedAt: at });
+      return finishBulk(`Archived ${plural(ids.length, 'asset')}`, {
+        label: 'Undo',
+        onClick: async () => {
+          for (const id of ids) await store.update('equipment', id, { archivedAt: null });
+          await refresh();
+          notify(`Restored ${plural(ids.length, 'asset')}`);
+        },
+      });
+    } catch {
+      notify('Archive failed — try again', 'warn');
+      return false;
+    }
+  };
+
+  const bulkCounts = (ids) => ids.reduce((acc, id) => {
+    const c = subtreeCounts(id);
+    return { subs: acc.subs + c.subs, points: acc.points + c.points, readings: acc.readings + c.readings };
+  }, { subs: 0, points: 0, readings: 0 });
+
+  const bulkDelete = async () => {
+    const ids = selection ? selection.ids : [];
+    try {
+      for (const id of ids) {
+        const { ids: all, pts } = subtreeCounts(id);
+        for (const p of pts) await store.deletePoint(p.id);
+        for (const eid of all) await store.remove('equipment', eid);
+      }
+      return finishBulk(`Deleted ${plural(ids.length, 'asset')}`);
+    } catch {
+      await refresh();
+      notify('Delete failed partway — check the list and try again', 'warn');
+      return false;
+    }
+  };
+
   const setArchived = async (id, on, { withUndo = true } = {}) => {
     const asset = tree.byId.get(id);
     try {
@@ -3488,6 +3902,9 @@ export default function InSpecApp() {
         archivedSelf={Boolean(asset.archivedAt)}
         onUnarchive={() => setArchived(asset.id, false)}
         onAssetMenu={(id) => setModal({ assetMenu: id })}
+        selection={selection && selection.scope === asset.id ? selection : null}
+        onStartSelect={(scope) => startSelect(scope)}
+        onToggleSelect={toggleSelect}
         statusById={statusById}
         tree={tree}
         points={pointsByEquipment.get(asset.id) || []}
@@ -3534,6 +3951,9 @@ export default function InSpecApp() {
         onBackup={() => setModal('backup')}
         onAssetMenu={(id) => setModal({ assetMenu: id })}
         storageKind={store.kind}
+        selection={selection && selection.scope === null ? selection : null}
+        onStartSelect={(scope) => startSelect(scope)}
+        onToggleSelect={toggleSelect}
       />
     );
   }
@@ -3581,6 +4001,46 @@ export default function InSpecApp() {
             />
           ) : null;
         })()}
+        {selection && selectionMatchesView(selection) && !modal && (
+          <SelectionBar
+            count={selection.ids.length}
+            total={selectable.length}
+            onSelectAll={() => setSelection((sel) => ({ ...sel, ids: selectable.map((e) => e.id) }))}
+            onClear={() => setSelection((sel) => ({ ...sel, ids: [] }))}
+            onDone={() => setSelection(null)}
+            actions={[
+              { key: 'add', label: 'Add param', icon: <Plus size={22} strokeWidth={2.5} />, onClick: () => setModal({ bulk: 'addParam' }) },
+              { key: 'copy', label: 'Copy params', icon: <Copy size={20} />, onClick: () => setModal({ bulk: 'copyParams' }) },
+              { key: 'move', label: 'Move', icon: <FolderInput size={21} />, onClick: () => setModal({ bulk: 'move' }) },
+              { key: 'archive', label: 'Archive', icon: <Archive size={20} />, onClick: bulkArchive },
+              { key: 'delete', label: 'Delete', icon: <Trash2 size={20} />, onClick: () => setModal({ bulk: 'delete' }), danger: true },
+            ]}
+          />
+        )}
+        {modal && modal.bulk === 'addParam' && selection && (
+          <AddParameterModal bulkCount={selection.ids.length} onClose={() => setModal(null)} onCreate={(f) => bulkAddParameter(f)} />
+        )}
+        {modal && modal.bulk === 'copyParams' && selection && (
+          <BulkCopyParamsModal
+            assets={data.equipment}
+            tree={tree}
+            pointsByEquipment={pointsByEquipment}
+            selectedIds={selection.ids}
+            onClose={() => setModal(null)}
+            onCopy={bulkCopyParameters}
+          />
+        )}
+        {modal && modal.bulk === 'move' && selection && (
+          <BulkMoveModal assets={data.equipment} tree={tree} selectedIds={selection.ids} onClose={() => setModal(null)} onMove={bulkMove} />
+        )}
+        {modal && modal.bulk === 'delete' && selection && (
+          <BulkDeleteModal
+            names={selection.ids.map((id) => (tree.byId.get(id) || {}).name).filter(Boolean)}
+            counts={bulkCounts(selection.ids)}
+            onClose={() => setModal(null)}
+            onConfirm={bulkDelete}
+          />
+        )}
         {modal && modal.assetMenu && (() => {
           const a = tree.byId.get(modal.assetMenu);
           return a ? (
@@ -3594,6 +4054,12 @@ export default function InSpecApp() {
               onArchive={() => setArchived(a.id, true)}
               onUnarchive={() => setArchived(a.id, false)}
               onDelete={() => setModal({ deleteAsset: a.id })}
+              onSelectMany={() => {
+                const scope = a.parentId != null && tree.byId.has(a.parentId) ? a.parentId : null;
+                setModal(null);
+                setView(scope == null ? { name: 'home' } : { name: 'asset', id: scope });
+                startSelect(scope, a.id);
+              }}
             />
           ) : null;
         })()}
@@ -3656,7 +4122,13 @@ export default function InSpecApp() {
         })()}
 
         {toast && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-[calc(1.5rem+var(--sab,0px))] z-[60] flex justify-center px-4">
+          <div
+            className={cx(
+              'pointer-events-none fixed inset-x-0 z-[60] flex justify-center px-4',
+              // sit above the bulk-action bar while it's showing
+              selection && selectionMatchesView(selection) && !modal ? 'bottom-[calc(9.5rem+var(--sab,0px))]' : 'bottom-[calc(1.5rem+var(--sab,0px))]',
+            )}
+          >
             <div
               key={toast.key}
               role="status"
