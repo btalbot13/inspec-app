@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  // Tailwind v3, matching the classes the app was built with. Compiled at build time - no CDN at runtime.
-  content: ['./index.html', './src/**/*.{js,jsx}'],
+  // Tailwind v3, compiled at build time (no CDN). App files live at the top level of the repo.
+  content: ['./index.html', './App.jsx', './main.jsx'],
   theme: {
     extend: {},
   },
