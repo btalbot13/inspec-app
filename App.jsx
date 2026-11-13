@@ -5,7 +5,7 @@
  * Storage: Dexie (IndexedDB) database "SpecLogDB" with tables equipment / inspectionPoints / readings,
  * falling back to localStorage if IndexedDB is unavailable. Daylight-mode styles live in src/index.css.
  */
-import React, { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, useContext, createContext } from 'react';
 import Dexie from 'dexie';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
@@ -2924,7 +2924,9 @@ function ExpandedChart({ point, readings, onClose }) {
   }));
   const scrollRef = useRef(null);
   const wrapRef = useRef(null);
-  const [selected, setSelected] = useState(null); // { index, cx, place: 'top' | 'bottom' } — set only by tapping a point
+  const [selected, setSelected] = useState(null); // { index, cx } — set only by tapping a point
+  const tipRef = useRef(null);
+  const [tipPos, setTipPos] = useState(null); // { left, top, place } — worked out after the tooltip is measured
   const [view, setView] = useState({ left: 0, width: 0 }); // the part of the wide chart currently on screen
   const dp = decimalsFor(point);
   const { min, max } = limits(point);
@@ -2978,32 +2980,53 @@ function ExpandedChart({ point, readings, onClose }) {
   const PLOT_BOTTOM = chartH - 22 - 36;
   const TIP_GAP = 6;
 
-  // Horizontal spot for the tooltip: centred on the point, kept inside what's on screen.
-  const tipLeft = (cx) => {
-    const edge = 8;
-    const visLeft = view.left + edge;
-    const visRight = view.left + view.width - edge;
-    return Math.max(visLeft, Math.min(cx - EXPANDED_TIP_W / 2, visRight - EXPANDED_TIP_W));
+  // A tap on a point opens its tooltip (tap it again to close).
+  const onDotTap = (index, cx) => {
+    setSelected((cur) => (cur && cur.index === index ? null : { index, cx }));
   };
 
-  // A tap on a point opens its tooltip (tap it again to close). The tooltip goes in the top or bottom of the
-  // chart, whichever has more clear space above/below the line across the tooltip's width.
-  const onDotTap = (index, cx) => {
-    if (selected && selected.index === index) {
-      setSelected(null);
-      return;
+  // Place the tooltip in the top or bottom of the chart, wherever it covers the least of the line, its points and
+  // their value labels — sliding it sideways if the line fills both. Measured before paint, so it never jumps, and
+  // it only moves when the selection, the scroll position or the layout changes (never with a finger drag).
+  useLayoutEffect(() => {
+    if (!selected) { setTipPos(null); return; }
+    const el = tipRef.current;
+    const wrap = wrapRef.current;
+    if (!el || !wrap) return;
+    const w = EXPANDED_TIP_W;
+    const h = el.offsetHeight;
+    const pts = [...wrap.querySelectorAll('[data-spec-dot]')]
+      .map((d) => ({ x: Number(d.getAttribute('data-cx')), y: Number(d.getAttribute('data-cy')) }))
+      .sort((a, b) => a.x - b.x);
+    const obstacles = [];
+    pts.forEach((q, i) => {
+      for (let dx = -10; dx <= 10; dx += 5) for (let dy = -30; dy <= 10; dy += 5) obstacles.push([q.x + dx, q.y + dy]); // dot + value label
+      const n = pts[i + 1];
+      if (n) {
+        const steps = Math.ceil(Math.hypot(n.x - q.x, n.y - q.y) / 3);
+        for (let k = 1; k < steps; k++) obstacles.push([q.x + ((n.x - q.x) * k) / steps, q.y + ((n.y - q.y) * k) / steps]);
+      }
+    });
+    const pad = 4;
+    const hits = (l, t) => obstacles.reduce((c, [x, y]) => c + (x > l - pad && x < l + w + pad && y > t - pad && y < t + h + pad ? 1 : 0), 0);
+    const visL = view.left + 8;
+    const visR = Math.max(visL, view.left + view.width - 8 - w);
+    const centred = Math.max(visL, Math.min(selected.cx - w / 2, visR));
+    const spots = [
+      ['top', 4],
+      ['bottom', Math.max(4, PLOT_BOTTOM - TIP_GAP - h)],
+    ];
+    let best = null;
+    for (const [place, top] of spots) {
+      const lefts = [centred];
+      for (let l = visL; l <= visR; l += 6) lefts.push(l);
+      for (const left of lefts) {
+        const score = hits(left, top) * 1000 + Math.abs(left - centred) + (place === 'bottom' ? 0.5 : 0);
+        if (!best || score < best.score) best = { score, left, top, place };
+      }
     }
-    const left = tipLeft(cx);
-    const right = left + EXPANDED_TIP_W;
-    const ys = [...(wrapRef.current ? wrapRef.current.querySelectorAll('[data-spec-dot]') : [])]
-      .map((el) => ({ x: Number(el.getAttribute('data-cx')), y: Number(el.getAttribute('data-cy')) }))
-      .filter((d) => d.x >= left - 40 && d.x <= right + 40) // points (and the line between them) under the tooltip
-      .map((d) => d.y);
-    const lineTop = ys.length ? Math.min(...ys) - 26 : PLOT_TOP; // value labels sit ~20px above each point
-    const lineBottom = ys.length ? Math.max(...ys) + 12 : PLOT_BOTTOM;
-    const place = lineTop - PLOT_TOP >= PLOT_BOTTOM - lineBottom ? 'top' : 'bottom';
-    setSelected({ index, cx, place });
-  };
+    setTipPos({ left: best.left, top: best.top, place: best.place });
+  }, [selected, view.left, view.width, chartW, chartH, zoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950 pb-[var(--sab,0px)] pt-[var(--sat,0px)]" role="dialog" aria-modal="true" aria-label={`${point.label} full history`}>
@@ -3087,13 +3110,11 @@ function ExpandedChart({ point, readings, onClose }) {
           if (!visible) return null;
           return (
             <div
+              ref={tipRef}
               className="pointer-events-none absolute z-10"
-              style={{
-                left: tipLeft(selected.cx),
-                ...(selected.place === 'top' ? { top: PLOT_TOP + TIP_GAP } : { bottom: chartH - PLOT_BOTTOM + TIP_GAP }),
-              }}
+              style={tipPos ? { left: tipPos.left, top: tipPos.top } : { left: 0, top: 0, visibility: 'hidden' }}
               role="status"
-              data-expanded-tip={selected.place}
+              data-expanded-tip={tipPos ? tipPos.place : undefined}
             >
               <TrendTooltip active payload={[{ payload: data[selected.index] }]} point={point} fixedWidth={EXPANDED_TIP_W} />
             </div>
