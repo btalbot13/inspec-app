@@ -679,21 +679,36 @@ function RangeInfo({ point, className }) {
   );
 }
 
+// Chart point. In the full-screen chart it also gets a finger-sized invisible tap target (onTap)
+// and a ring when it's the selected point.
 function SpecDot(props) {
-  const { cx: x, cy: y, payload, index, r = 4 } = props;
-  if (x == null || y == null) return <g key={`d-${index}`} />;
   const C = useChart();
+  const { cx: x, cy: y, payload, index, r = 4, onTap, selectedIndex } = props;
+  if (x == null || y == null) return <g key={`d-${index}`} />;
   const sev = (payload && payload.sev) || 'ok';
+  const dot = (
+    <circle cx={x} cy={y} r={sev === 'ok' ? r : r + 1.5} fill={C[sev]} stroke={C.dotStroke} strokeWidth={1.5} />
+  );
+  if (!onTap) return <g key={`d-${index}`}>{dot}</g>;
   return (
-    <circle
-      key={`d-${index}`}
-      cx={x}
-      cy={y}
-      r={sev === 'ok' ? r : r + 1.5}
-      fill={C[sev]}
-      stroke={C.dotStroke}
-      strokeWidth={1.5}
-    />
+    <g key={`d-${index}`}>
+      {selectedIndex === index && <circle cx={x} cy={y} r={r + 7} fill="none" stroke={C.line} strokeWidth={2.5} />}
+      {dot}
+      <circle
+        data-spec-dot={index}
+        data-cx={x}
+        data-cy={y}
+        cx={x}
+        cy={y}
+        r={22}
+        fill="transparent"
+        style={{ cursor: 'pointer', pointerEvents: 'all' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onTap(index, x, y);
+        }}
+      />
+    </g>
   );
 }
 
@@ -2908,7 +2923,8 @@ function ExpandedChart({ point, readings, onClose }) {
     h: typeof window !== 'undefined' ? window.innerHeight : 700,
   }));
   const scrollRef = useRef(null);
-  const [active, setActive] = useState(null); // { x, y } of the tapped point, in chart coordinates
+  const wrapRef = useRef(null);
+  const [selected, setSelected] = useState(null); // { index, cx, place: 'top' | 'bottom' } — set only by tapping a point
   const [view, setView] = useState({ left: 0, width: 0 }); // the part of the wide chart currently on screen
   const dp = decimalsFor(point);
   const { min, max } = limits(point);
@@ -2941,11 +2957,6 @@ function ExpandedChart({ point, readings, onClose }) {
     const el = scrollRef.current;
     if (el) setView({ left: el.scrollLeft - CHART_INSET, width: el.clientWidth });
   };
-  const trackActive = (state) => {
-    if (state && state.isTooltipActive && state.activeCoordinate) {
-      setActive({ x: state.activeCoordinate.x, y: state.activeCoordinate.y });
-    }
-  };
 
   const data = readings.map((r, i) => ({ i, value: r.value, sev: r.sev, notes: r.notes, recordedAt: r.recordedAt }));
   const values = readings.map((r) => r.value);
@@ -2962,20 +2973,37 @@ function ExpandedChart({ point, readings, onClose }) {
   const chartW = Math.max(size.w - 16, data.length * SPACING + 90);
   const chartH = Math.max(260, size.h - 190);
   const scrolls = chartW > size.w - 16;
-  // Keep the tooltip fully inside the visible part of the chart: to the right of the point when it fits,
-  // otherwise flipped to the left; never past either screen edge, whatever the scroll position.
-  const tipPosition = (() => {
-    if (!active || !view.width) return undefined;
-    const gap = 14;
+  // Plot area (inside the chart's margins and the date axis), in chart coordinates.
+  const PLOT_TOP = 28;
+  const PLOT_BOTTOM = chartH - 22 - 36;
+  const TIP_GAP = 6;
+
+  // Horizontal spot for the tooltip: centred on the point, kept inside what's on screen.
+  const tipLeft = (cx) => {
     const edge = 8;
     const visLeft = view.left + edge;
     const visRight = view.left + view.width - edge;
-    let x = active.x + gap;
-    if (x + EXPANDED_TIP_W > visRight) x = active.x - gap - EXPANDED_TIP_W;
-    x = Math.max(visLeft, Math.min(x, visRight - EXPANDED_TIP_W));
-    const y = Math.max(8, Math.min(active.y - 70, chartH - 150));
-    return { x, y };
-  })();
+    return Math.max(visLeft, Math.min(cx - EXPANDED_TIP_W / 2, visRight - EXPANDED_TIP_W));
+  };
+
+  // A tap on a point opens its tooltip (tap it again to close). The tooltip goes in the top or bottom of the
+  // chart, whichever has more clear space above/below the line across the tooltip's width.
+  const onDotTap = (index, cx) => {
+    if (selected && selected.index === index) {
+      setSelected(null);
+      return;
+    }
+    const left = tipLeft(cx);
+    const right = left + EXPANDED_TIP_W;
+    const ys = [...(wrapRef.current ? wrapRef.current.querySelectorAll('[data-spec-dot]') : [])]
+      .map((el) => ({ x: Number(el.getAttribute('data-cx')), y: Number(el.getAttribute('data-cy')) }))
+      .filter((d) => d.x >= left - 40 && d.x <= right + 40) // points (and the line between them) under the tooltip
+      .map((d) => d.y);
+    const lineTop = ys.length ? Math.min(...ys) - 26 : PLOT_TOP; // value labels sit ~20px above each point
+    const lineBottom = ys.length ? Math.max(...ys) + 12 : PLOT_BOTTOM;
+    const place = lineTop - PLOT_TOP >= PLOT_BOTTOM - lineBottom ? 'top' : 'bottom';
+    setSelected({ index, cx, place });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950 pb-[var(--sab,0px)] pt-[var(--sat,0px)]" role="dialog" aria-modal="true" aria-label={`${point.label} full history`}>
@@ -3001,7 +3029,7 @@ function ExpandedChart({ point, readings, onClose }) {
             <button
               key={label}
               type="button"
-              onClick={() => setZoom(v)}
+              onClick={() => { setZoom(v); setSelected(null); }}
               aria-pressed={zoom === v}
               className={cx(
                 'h-11 rounded-lg text-xs font-black uppercase tracking-wider',
@@ -3018,13 +3046,13 @@ function ExpandedChart({ point, readings, onClose }) {
       )}
 
       <div ref={scrollRef} onScroll={measureView} className="flex-1 overflow-x-auto overflow-y-hidden px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {/* Tapping empty chart area closes the tooltip; only a tap on a point opens one. */}
+        <div ref={wrapRef} className="relative" style={{ width: chartW, height: chartH }} onClick={() => setSelected(null)}>
         <LineChart
           width={chartW}
           height={chartH}
           data={data}
-          margin={{ top: 28, right: 8, bottom: 22, left: 8 }}
-          onMouseMove={trackActive}
-          onClick={trackActive}
+          margin={{ top: PLOT_TOP, right: 8, bottom: 22, left: 8 }}
         >
           <CartesianGrid stroke={C.grid} strokeDasharray="3 3" />
           <XAxis dataKey="i" type="category" interval={0} tick={<ExpandedTick data={data} />} stroke={C.axis} padding={{ left: 24, right: 24 }} height={36} />
@@ -3037,19 +3065,14 @@ function ExpandedChart({ point, readings, onClose }) {
           {alarmOn && <ReferenceLine y={amax} stroke={C.alarm} strokeDasharray="4 4" strokeOpacity={0.8} ifOverflow={zoom ? 'discard' : 'extendDomain'} />}
           {alarmOn && <ReferenceLine y={amin} stroke={C.alarm} strokeDasharray="4 4" strokeOpacity={0.8} ifOverflow={zoom ? 'discard' : 'extendDomain'} />}
           <ReferenceLine y={point.targetValue} stroke={C.ok} strokeDasharray="2 4" ifOverflow={zoom ? 'discard' : 'extendDomain'} />
-          <Tooltip
-            content={<TrendTooltip point={point} fixedWidth={EXPANDED_TIP_W} />}
-            cursor={{ stroke: C.cursor, strokeWidth: 1 }}
-            position={tipPosition}
-            isAnimationActive={false}
-          />
+          {selected && <ReferenceLine x={selected.index} stroke={C.cursor} strokeWidth={1.5} strokeDasharray="4 4" />}
           <Line
             type="linear"
             dataKey="value"
             stroke={C.line}
             strokeWidth={2.5}
-            dot={<SpecDot r={6} />}
-            activeDot={{ r: 10, stroke: C.activeStroke, strokeWidth: 2, fill: C.activeFill }}
+            dot={<SpecDot r={6} onTap={onDotTap} selectedIndex={selected ? selected.index : null} />}
+            activeDot={false}
             isAnimationActive={false}
             label={({ x, y, value, index }) => (
               <text key={`lbl-${index}`} x={x} y={y - 14} textAnchor="middle" fontSize={12} fontWeight={800} fontFamily="ui-monospace, monospace"
@@ -3059,6 +3082,24 @@ function ExpandedChart({ point, readings, onClose }) {
             )}
           />
         </LineChart>
+        {selected && data[selected.index] && (() => {
+          const visible = selected.cx >= view.left && selected.cx <= view.left + view.width;
+          if (!visible) return null;
+          return (
+            <div
+              className="pointer-events-none absolute z-10"
+              style={{
+                left: tipLeft(selected.cx),
+                ...(selected.place === 'top' ? { top: PLOT_TOP + TIP_GAP } : { bottom: chartH - PLOT_BOTTOM + TIP_GAP }),
+              }}
+              role="status"
+              data-expanded-tip={selected.place}
+            >
+              <TrendTooltip active payload={[{ payload: data[selected.index] }]} point={point} fixedWidth={EXPANDED_TIP_W} />
+            </div>
+          );
+        })()}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t-2 border-zinc-800 px-3 py-2 text-[11px] font-bold uppercase text-zinc-500">
